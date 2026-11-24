@@ -41,7 +41,8 @@ def field(label, value):
             x,y,X,Y = map(int,re.findall(r"\d+",item.get("bounds")))
             shell("input","tap",str((x+X)//2),str((y+Y)//2))
             shell("input","text",value)
-            shell("input","keyevent","4")
+            if "mInputShown=true" in shell("dumpsys","input_method"):
+                shell("input","keyevent","4")
             return
     raise AssertionError(label)
 
@@ -90,18 +91,27 @@ def main():
     tap("0")
     tap("Сохранить настройки")
     clock=datetime.fromisoformat(shell("date","+%Y-%m-%dT%H:%M:%S").strip())
-    due=clock+timedelta(minutes=2)
+    due=clock+timedelta(minutes=3)
     if due.date()!=clock.date():
         raise RuntimeError("Run outside the midnight transition")
+    create("CancelledDone",due.strftime("%H:%M"))
+    tap("Выполнить ·",True)
+    create("CancelledDelete",due.strftime("%H:%M"))
+    tap("CancelledDelete")
+    tap("Удалить")
+    tap("android:id/button1")
     create("AlarmProbe",due.strftime("%H:%M"))
     shell("input","keyevent","3")
     shell("am","kill",PACKAGE)
-    until=time.monotonic()+145
+    until=time.monotonic()+200
     while time.monotonic()<until:
         if "AlarmProbe" in shell("dumpsys","notification","--noredact"):
             observed = datetime.fromisoformat(shell("date","+%Y-%m-%dT%H:%M:%S").strip())
             delay = (observed - due.replace(second=0)).total_seconds()
             assert 0 <= delay <= 60, f"Notification time offset: {delay}s"
+            time.sleep(5)
+            notices = shell("dumpsys","notification","--noredact")
+            assert "CancelledDone" not in notices and "CancelledDelete" not in notices
             print(f"PASS TC-11 notification observed {delay:.0f}s after due time",flush=True)
             return
         time.sleep(2)
