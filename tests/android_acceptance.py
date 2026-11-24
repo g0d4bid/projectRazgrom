@@ -22,14 +22,14 @@ def node(label, prefix=False):
     until = time.monotonic() + 25
     while time.monotonic() < until:
         for item in tree().iter("node"):
-            for key in ("text", "content-desc"):
+            for key in ("text", "content-desc", "resource-id"):
                 value = item.get(key,"")
-                if (prefix and value.startswith(label)) or value == label:
+                if (prefix and value.startswith(label)) or value.casefold() == label.casefold():
                     return item
         # A crashed app cannot expose the expected screen.
         if not shell("pidof", PACKAGE).strip():
             raise RuntimeError("App exited while looking for " + label)
-    raise AssertionError("Missing control: " + label)
+    raise AssertionError("Missing control: " + label + "; screen: " + ElementTree.tostring(tree(), encoding="unicode"))
 
 def tap(label, prefix=False):
     x,y,X,Y = map(int,re.findall(r"\d+",node(label,prefix).get("bounds")))
@@ -79,7 +79,7 @@ def main():
     node("Выполнена ·",True)
     tap("OfflineTask")
     tap("Удалить")
-    tap("Удалить")
+    tap("android:id/button1")
     node("На этот день задач нет")
     print("PASS TC-12 offline create, week selection, completion, restart, deletion",flush=True)
     tap("Настройки")
@@ -99,7 +99,10 @@ def main():
     until=time.monotonic()+145
     while time.monotonic()<until:
         if "AlarmProbe" in shell("dumpsys","notification","--noredact"):
-            print("PASS TC-11 notification received with app in background",flush=True)
+            observed = datetime.fromisoformat(shell("date","+%Y-%m-%dT%H:%M:%S").strip())
+            delay = (observed - due.replace(second=0)).total_seconds()
+            assert 0 <= delay <= 60, f"Notification time offset: {delay}s"
+            print(f"PASS TC-11 notification observed {delay:.0f}s after due time",flush=True)
             return
         time.sleep(2)
     raise AssertionError("Notification not received")
