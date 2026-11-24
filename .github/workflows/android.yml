@@ -1,0 +1,60 @@
+name: Python Android
+on:
+  push:
+    branches: [feature/python-android, main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: python -m unittest discover -s pr3_prototype -v
+      - run: gradle :android:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Razgrom-Python
+          path: android/build/outputs/apk/debug/*.apk
+  acceptance:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [30, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Razgrom-Python
+          path: package
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          disable-animations: true
+          script: |
+            adb install -g package/android-debug.apk
+            if [ ${{ matrix.api }} -ge 31 ]; then adb shell appops set ru.razgrom.diary.python SCHEDULE_EXACT_ALARM allow; fi
+            python tests/android_acceptance.py || (adb logcat -b crash -d; exit 1)
+
+
