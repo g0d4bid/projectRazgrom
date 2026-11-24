@@ -5,3 +5,7 @@ dist/
 *.p12
 *.keystore
 local.properties
+
+.gradle/
+android/build/
+build/

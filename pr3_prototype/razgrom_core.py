@@ -4,6 +4,7 @@
 TaskRepository (работа с SQLite) и ReminderPlanner (расчёт времени напоминаний).
 """
 import sqlite3
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -36,6 +37,7 @@ class TaskRepository:
         self.db.close()
 
     def create(self, task: Task) -> int:
+        validate_deadline(task)
         now = datetime.now().isoformat(timespec='seconds')
         with self.db:  # транзакция
             cur = self.db.execute(
@@ -47,6 +49,7 @@ class TaskRepository:
         return task.id
 
     def update(self, task: Task):
+        validate_deadline(task)
         with self.db:
             self.db.execute(
                 'UPDATE tasks SET title = ?, due_date = ?, due_time = ?, priority = ?, is_done = ?, remind = ?, '
@@ -87,6 +90,17 @@ class TaskRepository:
         return [_to_task(r) for r in rows]
 
 
+def validate_deadline(task):
+    try:
+        if date.fromisoformat(task.due_date).isoformat() != task.due_date:
+            raise ValueError
+        if task.due_time is not None:
+            if not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", task.due_time):
+                raise ValueError
+    except (ValueError, TypeError) as exc:
+        raise sqlite3.IntegrityError("Проверьте дату (ГГГГ-ММ-ДД) и время (ЧЧ:ММ)") from exc
+
+
 def _to_task(row) -> Task:
     return Task(id=row['id'], title=row['title'], due_date=row['due_date'], due_time=row['due_time'],
                 priority=row['priority'], is_done=bool(row['is_done']), remind=bool(row['remind']))
@@ -104,7 +118,11 @@ class ReminderPlanner:
     def fire_time(self, task: Task) -> datetime | None:
         if task.is_done or not task.remind or task.due_time is None:
             return None
-        due = datetime.fromisoformat(f'{task.due_date}T{task.due_time}')
+        try:
+            validate_deadline(task)
+            due = datetime.fromisoformat(f'{task.due_date}T{task.due_time}')
+        except (ValueError, sqlite3.IntegrityError):
+            return None  # Одна старая ошибочная запись не отменяет остальные напоминания.
         return due - timedelta(minutes=self.minutes_before)
 
     def plan(self, tasks: list[Task], now: datetime) -> dict[int, datetime]:

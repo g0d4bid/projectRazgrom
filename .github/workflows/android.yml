@@ -1,49 +1,44 @@
-name: Android APK
+name: Python Android
 on:
   push:
-    branches: ['feature/android-mvp', main]
-    tags: ['v*']
+    branches: [feature/python-android, main]
   pull_request:
+    branches: [main]
 permissions:
   contents: read
 jobs:
-  build:
+  acceptance:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Prototype regression tests
-        run: python3 -m unittest discover -s pr3_prototype -v
-      - name: Android validation tests
-        run: |
-          mkdir -p /tmp/razgrom-tests
-          javac -encoding UTF-8 -d /tmp/razgrom-tests android/src/main/java/ru/razgrom/diary/Rules.java tests/RulesTest.java
-          java -cp /tmp/razgrom-tests ru.razgrom.diary.RulesTest
-      - name: Install Android build tools
-        run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
-      - name: Build and verify APK
-        run: python3 build_apk.py
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: python -m unittest discover -s pr3_prototype -v
+      - run: gradle :android:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: Razgrom-APK
-          path: dist/Razgrom-1.0.apk
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
+          name: Razgrom-Python
+          path: android/build/outputs/apk/debug/*.apk
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
         with:
-          name: Razgrom-APK
-          path: dist
-      - name: Publish APK
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/Razgrom-1.0.apk --repo "$GITHUB_REPOSITORY" --verify-tag --title "Разгром 1.0" --notes "Учебная сборка для Android 8.0 и новее."
+          api-level: 30
+          arch: x86_64
+          disable-animations: true
+          script: |
+            adb install android/build/outputs/apk/debug/android-debug.apk
+            python tests/android_acceptance.py || (adb logcat -b crash -d; exit 1)
 
